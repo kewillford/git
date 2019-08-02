@@ -119,6 +119,17 @@ static int query_fsmonitor(int version, uint64_t last_update, struct strbuf *que
 	if (!core_fsmonitor)
 		return -1;
 
+	if (!strcmp(core_fsmonitor, ":internal:"))
+#ifdef HAVE_FSMONITOR_DAEMON_BACKEND
+		return fsmonitor_query_daemon(last_update, query_result);
+#else
+	{
+		warning(_("internal fsmonitor unavailable; falling back"));
+		strbuf_add(query_result, "/", 2);
+		return 0;
+	}
+#endif
+
 	argv_array_push(&cp.args, core_fsmonitor);
 	argv_array_pushf(&cp.args, "%d", version);
 	argv_array_pushf(&cp.args, "%" PRIuMAX, (uintmax_t)last_update);
