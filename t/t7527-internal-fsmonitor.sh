@@ -23,7 +23,10 @@ test_expect_success 'can start and stop the daemon' '
 		nul_to_q <actual >actual.filtered &&
 		printf 0Q/Q >expect &&
 		test_cmp expect actual.filtered
-	)
+	) &&
+	sleep 0 &&
+	rm -rf test/.git &&
+	test_must_fail git -C test fsmonitor--daemon --is-running
 '
 
 test_done

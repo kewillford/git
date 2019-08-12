@@ -67,6 +67,14 @@ struct fsmonitor_daemon_state *fsmonitor_listen(struct fsmonitor_daemon_state *s
 		for (;;) {
 			FILE_NOTIFY_INFORMATION *info = (void *)p;
 
+			if (info->Action == FILE_ACTION_REMOVED &&
+			    info->FileNameLength == 4 * sizeof(WCHAR) &&
+			    !wcsncmp(info->FileName, L".git", 4)) {
+				CloseHandle(dir);
+				/* force-quit */
+				exit(0);
+			}
+
 			if (process_entry(state, info, &queue, time) < 0) {
 				CloseHandle(dir);
 				state->error_code = -1;
