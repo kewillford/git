@@ -189,6 +189,9 @@ void refresh_fsmonitor(struct index_state *istate)
 		}
 		if (bol < query_result.len)
 			fsmonitor_refresh_callback(istate, buf + bol);
+
+		if (istate->untracked)
+			istate->untracked->use_fsmonitor = 1;
 	} else {
 		/* Mark all entries invalid */
 		for (i = 0; i < istate->cache_nr; i++)
@@ -257,9 +260,7 @@ void tweak_fsmonitor(struct index_state *istate)
 				    (uintmax_t)istate->fsmonitor_dirty->bit_size, (uintmax_t)istate->cache_nr);
 			ewah_each_bit(istate->fsmonitor_dirty, fsmonitor_ewah_callback, istate);
 
-			/* Now mark the untracked cache for fsmonitor usage */
-			if (istate->untracked)
-				istate->untracked->use_fsmonitor = 1;
+			refresh_fsmonitor(istate);
 		}
 
 		ewah_free(istate->fsmonitor_dirty);
