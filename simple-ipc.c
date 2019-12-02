@@ -148,6 +148,10 @@ int ipc_send_command(const char *path, const char *message, struct strbuf *answe
 	DWORD mode = PIPE_READMODE_BYTE, length;
 	int ret = 0;
 
+	trace2_region_enter("simple-ipc", "send", the_repository);
+	trace2_data_string("simple-ipc", the_repository, "path", path);
+	trace2_data_string("simple-ipc", the_repository, "message", message);
+
 	if (initialize_pipe_name(path, wpath, ARRAY_SIZE(wpath)) < 0) {
 		ret = -1;
 		goto leave_send_command;
@@ -202,8 +206,11 @@ int ipc_send_command(const char *path, const char *message, struct strbuf *answe
 		answer->len += length;
 	}
 	strbuf_setlen(answer, answer->len);
+	trace2_data_string("simple-ipc", the_repository, "answer", answer->buf);
 
 leave_send_command:
+	trace2_region_leave("simple-ipc", "send", the_repository);
+
 	CloseHandle(pipe);
 	return ret < 0 ? -1 : 0;
 }

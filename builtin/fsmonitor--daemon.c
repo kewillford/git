@@ -61,17 +61,23 @@ static int handle_client(struct ipc_command_listener *data,
 	uintmax_t since;
 	char *p;
 	struct fsmonitor_queue_item *queue;
+	intmax_t count = 0;
+
+	trace2_data_string("fsmonitor", the_repository, "command", command);
 
 	if (!strcmp(command, "quit")) {
 		reply(reply_data, "");
 		return SIMPLE_IPC_QUIT;
 	}
 
+	trace2_region_enter("fsmonitor", "serve", the_repository);
+
 	version = strtoul(command, &p, 10);
 	if (version != FSMONITOR_VERSION) {
 		reply(reply_data, "/");
 		error(_("fsmonitor: unhandled version (%lu, command: %s)"),
 		      version, command);
+		trace2_region_leave("fsmonitor", "serve", the_repository);
 		return -1;
 	}
 	while (isspace(*p))
@@ -86,6 +92,7 @@ static int handle_client(struct ipc_command_listener *data,
 		error(_("fsmonitor: %s (%" PRIuMAX", command: %s, rest %s)"),
 		      *p ? "extra stuff" : "incorrect/early timestamp",
 		      since, command, p);
+		trace2_region_leave("fsmonitor", "serve", the_repository);
 		return -1;
 	}
 
@@ -98,8 +105,14 @@ static int handle_client(struct ipc_command_listener *data,
 		/* write the path, followed by a NUL */
 		if (reply(reply_data, queue->path->path) < 0)
 			break;
+		trace2_data_string("fsmonitor", the_repository,
+				   "serve.path", queue->path->path);
+		count++;
 		queue = queue->next;
 	}
+
+	trace2_data_intmax("fsmonitor", the_repository, "serve.count", count);
+	trace2_region_leave("fsmonitor", "serve", the_repository);
 
 	return 0;
 }
@@ -133,6 +146,8 @@ int fsmonitor_queue_path(struct fsmonitor_daemon_state *state,
 		FLEXPTR_ALLOC_STR(e, path, path);
 		hashmap_put(&state->paths, &e->entry);
 	}
+
+	trace2_data_string("fsmonitor", the_repository, "path", e->path);
 
 	item = xmalloc(sizeof(*item));
 	item->path = e;
