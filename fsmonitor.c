@@ -310,4 +310,9 @@ int fsmonitor_query_daemon(uint64_t since, struct strbuf *answer)
 	strbuf_release(&command);
 	return ret;
 }
+
+int fsmonitor_daemon_is_running(void)
+{
+	return ipc_is_active(git_path_fsmonitor());
+}
 #endif
