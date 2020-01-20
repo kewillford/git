@@ -83,6 +83,7 @@ extern const char *git_path_fsmonitor(void);
 
 int fsmonitor_query_daemon(uint64_t since, struct strbuf *answer);
 int fsmonitor_daemon_is_running(void);
+int fsmonitor_spawn_daemon(void);
 
 /* Internal fsmonitor */
 struct fsmonitor_path {

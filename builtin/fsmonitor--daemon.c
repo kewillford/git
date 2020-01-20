@@ -27,7 +27,7 @@ static int fsmonitor_query_daemon(uintmax_t unused_since,
 	die(_("no native fsmonitor daemon available"));
 }
 
-static int fsmonitor_run_daemon(void)
+static int fsmonitor_run_daemon(int unused_background)
 {
 	die(_("no native fsmonitor daemon available"));
 }
@@ -134,7 +134,7 @@ int fsmonitor_queue_path(struct fsmonitor_daemon_state *state,
 	return 0;
 }
 
-static int fsmonitor_run_daemon(void)
+static int fsmonitor_run_daemon(int background)
 {
 	pthread_t thread;
 	struct fsmonitor_daemon_state state = { { 0 } };
@@ -145,6 +145,9 @@ static int fsmonitor_run_daemon(void)
 		},
 		.state = &state,
 	};
+
+	if (background && daemonize())
+		BUG(_("daemonize() not supported on this platform"));
 
 	hashmap_init(&state.paths, paths_cmp, NULL, 0);
 	pthread_mutex_init(&state.queue_update_lock, NULL);
@@ -166,11 +169,13 @@ static int fsmonitor_run_daemon(void)
 int cmd_fsmonitor__daemon(int argc, const char **argv, const char *prefix)
 {
 	enum daemon_mode {
-		QUERY = 0, RUN, IS_RUNNING, IS_SUPPORTED
+		QUERY = 0, RUN, START, IS_RUNNING, IS_SUPPORTED
 	} mode = QUERY;
 	struct option options[] = {
 		OPT_CMDMODE(0, "query", &mode, N_("query the daemon"), QUERY),
 		OPT_CMDMODE(0, "run", &mode, N_("run the daemon"), RUN),
+		OPT_CMDMODE(0, "start", &mode, N_("run in the background"),
+			    START),
 		OPT_CMDMODE('t', "is-running", &mode,
 			    N_("test whether the daemon is running"),
 			    IS_RUNNING),
@@ -220,5 +225,11 @@ int cmd_fsmonitor__daemon(int argc, const char **argv, const char *prefix)
 	if (mode == IS_RUNNING)
 		return !fsmonitor_daemon_is_running();
 
-	return !!fsmonitor_run_daemon();
+#ifdef GIT_WINDOWS_NATIVE
+	/* Windows cannot daemonize(); emulate it */
+	if (mode == START)
+		return !!fsmonitor_spawn_daemon();
+#endif
+
+	return !!fsmonitor_run_daemon(mode == START);
 }
