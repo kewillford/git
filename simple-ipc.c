@@ -30,6 +30,17 @@ static int initialize_pipe_name(const char *path, wchar_t *wpath, size_t alloc)
 	return 0;
 }
 
+int ipc_is_active(const char *path)
+{
+	wchar_t pipe_path[MAX_PATH];
+
+	if (initialize_pipe_name(path, pipe_path, ARRAY_SIZE(pipe_path)) < 0)
+		return 0;
+
+	return WaitNamedPipeW(pipe_path, 1) ||
+		GetLastError() != ERROR_FILE_NOT_FOUND;
+}
+
 struct ipc_handle_client_data {
 	struct ipc_command_listener *server;
 	HANDLE pipe;
