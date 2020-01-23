@@ -30,6 +30,14 @@ static int process_entry(struct fsmonitor_daemon_state *state,
 	return 0;
 }
 
+int fsmonitor_listen_stop(struct fsmonitor_daemon_state *state)
+{
+	if (!TerminateThread(state->watcher_thread.handle, 1))
+		return -1;
+
+	return 0;
+}
+
 struct fsmonitor_daemon_state *fsmonitor_listen(struct fsmonitor_daemon_state *state)
 {
 	HANDLE dir;
