@@ -9,6 +9,9 @@ git fsmonitor--daemon --is-supported || {
 	test_done
 }
 
+# Tell the fsmonitor--daemon to stop, even if `--stop` failed
+test_atexit 'test -n "$debug" || rm -r .git'
+
 test_expect_success 'can start and stop the daemon' '
 	test_when_finished \
 		"test_might_fail git -C test fsmonitor--daemon --stop" &&
