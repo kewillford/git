@@ -40,6 +40,11 @@ int cmd__simple_ipc(int argc, const char **argv)
 	const char *path = "ipc-test";
 	int i;
 
+	if (argc > 1 && skip_prefix(argv[1], "--path=", &path)) {
+		argv++;
+		argc--;
+	}
+
 	if (argc == 2 && !strcmp(argv[1], "SUPPORTS_SIMPLE_IPC"))
 		return 0;
 
