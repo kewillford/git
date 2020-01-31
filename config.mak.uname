@@ -135,6 +135,8 @@ ifeq ($(uname_S),Darwin)
 	HAVE_NS_GET_EXECUTABLE_PATH = YesPlease
 	BASIC_CFLAGS += -I/usr/local/include
 	BASIC_LDFLAGS += -L/usr/local/lib
+	FSMONITOR_DAEMON_BACKEND = macos
+	BASIC_LDFLAGS += -framework CoreServices
 endif
 ifeq ($(uname_S),SunOS)
 	NEEDS_SOCKET = YesPlease
