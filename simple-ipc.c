@@ -30,6 +30,12 @@ static int initialize_pipe_name(const char *path, wchar_t *wpath, size_t alloc)
 	return 0;
 }
 
+static int is_active(wchar_t *pipe_path)
+{
+	return WaitNamedPipeW(pipe_path, 1) ||
+		GetLastError() != ERROR_FILE_NOT_FOUND;
+}
+
 int ipc_is_active(const char *path)
 {
 	wchar_t pipe_path[MAX_PATH];
@@ -37,8 +43,7 @@ int ipc_is_active(const char *path)
 	if (initialize_pipe_name(path, pipe_path, ARRAY_SIZE(pipe_path)) < 0)
 		return 0;
 
-	return WaitNamedPipeW(pipe_path, 1) ||
-		GetLastError() != ERROR_FILE_NOT_FOUND;
+	return is_active(pipe_path);
 }
 
 struct ipc_handle_client_data {
@@ -100,6 +105,9 @@ int ipc_listen_for_commands(struct ipc_command_listener *server)
 	if (initialize_pipe_name(server->path, server->pipe_path,
 				 ARRAY_SIZE(server->pipe_path)) < 0)
 		return -1;
+
+	if (is_active(server->pipe_path))
+		return error(_("server already running at %s"), server->path);
 
 	data.pipe = CreateNamedPipeW(server->pipe_path,
 		PIPE_ACCESS_INBOUND | PIPE_ACCESS_OUTBOUND,
