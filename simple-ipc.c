@@ -78,6 +78,7 @@ static DWORD WINAPI ipc_handle_client(LPVOID param)
 			      buffer + offset, sizeof(buffer) - offset,
 			      &length, NULL)) {
 			DWORD err = GetLastError();
+error("ReadFile failed; got '%.*s' %ld", (int)length, buffer + offset, length);
 			if (err != ERROR_BROKEN_PIPE)
 				ret = error(_("read error (IPC) %ld"), err);
 			break;
@@ -179,6 +180,7 @@ int ipc_send_command(const char *path, const char *message, struct strbuf *answe
 		goto leave_send_command;
 	}
 
+error("writing '%s'", message);
 	if (!WriteFile(pipe, message, strlen(message) + 1, &length, NULL) ||
 			length != strlen(message) + 1) {
 		ret = error(_("could not send '%s' (%ld)"), message,
@@ -187,6 +189,7 @@ int ipc_send_command(const char *path, const char *message, struct strbuf *answe
 	}
 	FlushFileBuffers(pipe);
 
+error("reading");
 	for (;;) {
 		size_t alloc = 16384;
 
@@ -194,6 +197,7 @@ int ipc_send_command(const char *path, const char *message, struct strbuf *answe
 		if (!ReadFile(pipe, answer->buf + answer->len, alloc, &length,
 			      NULL)) {
 			DWORD err = GetLastError();
+error("err: %ld", err);
 			errno = err_win_to_posix(err);
 			if (err != ERROR_BROKEN_PIPE &&
 			    err != ERROR_PIPE_NOT_CONNECTED)
@@ -206,6 +210,7 @@ int ipc_send_command(const char *path, const char *message, struct strbuf *answe
 		answer->len += length;
 	}
 	strbuf_setlen(answer, answer->len);
+error("answer: '%s'", answer->buf);
 	trace2_data_string("simple-ipc", the_repository, "answer", answer->buf);
 
 leave_send_command:

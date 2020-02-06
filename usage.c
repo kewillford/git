@@ -70,13 +70,27 @@ static NORETURN void die_builtin(const char *err, va_list params)
 
 static void error_builtin(const char *err, va_list params)
 {
+	char buf[32768];
+	struct timeval tv;
+	struct tm tm;
+	time_t secs;
+
+	gettimeofday(&tv, NULL);
+	secs = tv.tv_sec;
+	gmtime_r(&secs, &tm);
+
+	xsnprintf(buf, sizeof(buf),
+		  "error %4d-%02d-%02dT%02d:%02d:%02d.%06ldZ (pid %ld): ",
+		  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour,
+		  tm.tm_min, tm.tm_sec, (long)tv.tv_usec, (long)getpid());
+
 	/*
 	 * We call this trace2 function first and expect it to va_copy 'params'
 	 * before using it (because an 'ap' can only be walked once).
 	 */
 	trace2_cmd_error_va(err, params);
 
-	vreportf("error: ", err, params);
+	vreportf(buf, err, params);
 }
 
 static void warn_builtin(const char *warn, va_list params)
