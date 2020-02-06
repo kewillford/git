@@ -178,6 +178,7 @@ int ipc_send_command(const char *path, const char *message, struct strbuf *answe
 		goto leave_send_command;
 	}
 
+error("writing '%s'", message);
 	fd = _open_osfhandle((intptr_t)pipe, O_RDWR|O_BINARY);
 	if (fd < 0) {
 		ret = -1;
@@ -191,6 +192,7 @@ int ipc_send_command(const char *path, const char *message, struct strbuf *answe
 	}
 	FlushFileBuffers(pipe);
 
+error("reading");
 	if (answer) {
 		ret = read_packetized_to_strbuf(fd, answer,
 						PACKET_READ_NEVER_DIE);
@@ -199,6 +201,7 @@ int ipc_send_command(const char *path, const char *message, struct strbuf *answe
 		else
 			trace2_data_string("simple-ipc", the_repository,
 					   "answer", answer->buf);
+error("answer: '%s'", answer->buf);
 	}
 
 leave_send_command:
