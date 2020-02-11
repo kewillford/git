@@ -254,11 +254,7 @@ static void set_socket_blocking_flag(int fd, int make_nonblocking)
 static int reply(void *reply_data, const char *response)
 {
 	int fd = *(int *)reply_data;
-	struct strbuf sb = STRBUF_INIT;
-
-	packet_buf_write(&sb, "%s", response);
-
-	return write_in_full(fd, sb.buf, sb.len) != sb.len ? -1 : 0;
+	return packet_write_fmt_gently(fd, "%s", response);
 }
 
 /* in ms */
@@ -322,7 +318,9 @@ int ipc_listen_for_commands(struct ipc_command_listener *listener)
 		 */
 		set_socket_blocking_flag(client_fd, 0);
 
-		flags = PACKET_READ_GENTLE_ON_EOF | PACKET_READ_CHOMP_NEWLINE;
+		flags = PACKET_READ_GENTLE_ON_EOF |
+			PACKET_READ_CHOMP_NEWLINE |
+			PACKET_READ_NEVER_DIE;
 		bytes_read = packet_read(client_fd, NULL, NULL, buf,
 					 sizeof(buf), flags);
 
@@ -382,7 +380,8 @@ int ipc_send_command(const char *path, const char *message,
 			bytes_read = packet_read(fd, NULL, NULL, answer->buf,
 						 answer->alloc,
 						 PACKET_READ_GENTLE_ON_EOF |
-						 PACKET_READ_CHOMP_NEWLINE);
+						 PACKET_READ_CHOMP_NEWLINE |
+						 PACKET_READ_NEVER_DIE);
 
 			if (bytes_read < 0)
 				ret = -1;
