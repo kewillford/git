@@ -79,6 +79,11 @@ void FSEventStreamRelease(FSEventStreamRef stream);
 static struct strbuf watch_dir = STRBUF_INIT;
 static FSEventStreamRef stream;
 
+static void trace2_message(const char *key, const char *message)
+{
+	trace2_data_string("fsmonitor-macos", the_repository, key, message);
+}
+
 static void fsevent_callback(ConstFSEventStreamRef streamRef,
 			     void *ctx,
 			     size_t num_of_events,
@@ -87,11 +92,13 @@ static void fsevent_callback(ConstFSEventStreamRef streamRef,
 			     const FSEventStreamEventId event_ids[])
 {
 	int i;
+	struct stat st;
 	char **paths = (char **)event_paths;
 	struct fsmonitor_queue_item dummy, *queue = &dummy;
 	uint64_t time = getnanotime();
 	struct fsmonitor_daemon_state *state = ctx;
 	struct strbuf work_str = STRBUF_INIT;
+	struct string_list cookie_release_list = STRING_LIST_INIT_DUP;
 
 	/* Ensure strictly increasing timestamps */
 	if (time <= state->latest_update)
@@ -103,40 +110,48 @@ static void fsevent_callback(ConstFSEventStreamRef streamRef,
 		if (strlen(paths[i]) != watch_dir.len)
 			strbuf_remove(&work_str, 0, 1);
 
-		if (!strcmp(work_str.buf, ".git") && (event_flags[i] & kFSEventStreamEventFlagItemRemoved)) {
-			trace2_printf(".git directory being removed so quitting\n");
+		if ((event_flags[i] & kFSEventStreamEventFlagRootChanged) ||
+		    ((event_flags[i] & kFSEventStreamEventFlagItemRemoved) &&
+		    !strcmp(work_str.buf, ".git") &&
+		    lstat(paths[i], &st))) {
+			trace2_message("message", ".git directory being removed so quitting.");
 			exit(0);
 		}
 
 		if ((event_flags[i] & kFSEventStreamEventFlagKernelDropped) ||
 		    (event_flags[i] & kFSEventStreamEventFlagUserDropped)) {
-			trace2_printf("Dropped event %llu flags %u\n", event_ids[i], event_flags[i]);
+			trace2_message("message", "Dropped event");
 			fsmonitor_queue_path(state, &queue, "/", 1, time);
 		}
 
 		if (strcmp(work_str.buf, ".git") && !starts_with(work_str.buf, ".git/")) {
-			trace2_printf("Change %llu in '%s' flags %u\n", event_ids[i], work_str.buf, event_flags[i]);
 			fsmonitor_queue_path(state, &queue,
 					     work_str.buf, work_str.len, time);
-		} else {
-			trace2_printf("Skipping %llu in '%s' flags %u\n", event_ids[i], work_str.buf, event_flags[i]);
+		} else if (starts_with(work_str.buf, ".git/") &&
+			   starts_with(work_str.buf + 5, FSMONITOR_COOKIE_PREFIX) &&
+			   !(event_flags[i] & kFSEventStreamEventFlagItemRemoved)) {
+			string_list_append(&cookie_release_list, work_str.buf + 5);
 		}
 
 		strbuf_reset(&work_str);
 	}
 
-	/* Shouldn't happen; defensive programming */
-	if (queue == &dummy)
-		return;
+	/* Only update the queue if it changed */
+	if (queue != &dummy) {
+		pthread_mutex_lock(&state->queue_update_lock);
+		if (state->first)
+			state->first->previous = dummy.previous;
+		dummy.previous->next = state->first;
+		state->first = queue;
+		state->latest_update = time;
+		pthread_mutex_unlock(&state->queue_update_lock);
+	}
 
-	pthread_mutex_lock(&state->queue_update_lock);
-	if (state->first)
-		state->first->previous = dummy.previous;
-	dummy.previous->next = state->first;
-	state->first = queue;
-	state->latest_update = time;
-	pthread_mutex_unlock(&state->queue_update_lock);
+	for (i = 0; i < cookie_release_list.nr; i++) {
+		fsmonitor_cookie_seen_trigger(state, cookie_release_list.items[i].string);
+	}
 
+	string_list_clear(&cookie_release_list, 0);
 	strbuf_release(&work_str);
 }
 

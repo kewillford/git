@@ -379,6 +379,65 @@ void tweak_fsmonitor(struct index_state *istate)
 #include "simple-ipc.h"
 
 GIT_PATH_FUNC(git_path_fsmonitor, "fsmonitor")
+static int cookie_seq = 0;
+
+
+void fsmonitor_wait_for_cookie(struct fsmonitor_daemon_state *state)
+{
+	int fd;
+	struct fsmonitor_cookie_item cookie;
+	const char *cookie_path;
+	struct strbuf cookie_filename = STRBUF_INIT;
+
+	strbuf_addstr(&cookie_filename, FSMONITOR_COOKIE_PREFIX);
+	strbuf_addf(&cookie_filename, "%i-%i", getpid(), cookie_seq++);
+	cookie.name = strbuf_detach(&cookie_filename, NULL);
+	cookie.seen = 0;
+	hashmap_entry_init(&cookie.entry, strhash(cookie.name));
+	pthread_mutex_init(&cookie.seen_lock, NULL);
+	pthread_cond_init(&cookie.seen_cond, NULL);
+
+	pthread_mutex_lock(&state->cookies_lock);
+	hashmap_add(&state->cookies, &cookie.entry);
+	pthread_mutex_unlock(&state->cookies_lock);
+	cookie_path = git_pathdup("%s", cookie.name);
+	fd = open(cookie_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+	if (fd >= 0) {
+		close(fd);
+		pthread_mutex_lock(&cookie.seen_lock);
+		while (!cookie.seen)
+			pthread_cond_wait(&cookie.seen_cond, &cookie.seen_lock);
+		cookie.seen = 0;
+		pthread_mutex_unlock(&cookie.seen_lock);
+		unlink_or_warn(cookie_path);
+	} else {
+		pthread_mutex_lock(&state->cookies_lock);
+		hashmap_remove(&state->cookies, &cookie.entry, NULL);
+		pthread_mutex_unlock(&state->cookies_lock);
+	}
+}
+
+void fsmonitor_cookie_seen_trigger(struct fsmonitor_daemon_state *state,
+				   const char *cookie_name)
+{
+	struct fsmonitor_cookie_item key;
+	struct fsmonitor_cookie_item *cookie;
+
+	hashmap_entry_init(&key.entry, strhash(cookie_name));
+	key.name = cookie_name;
+	cookie = hashmap_get_entry(&state->cookies, &key, entry, NULL);
+
+	if (cookie) {
+		pthread_mutex_lock(&cookie->seen_lock);
+		cookie->seen = 1;
+		pthread_cond_signal(&cookie->seen_cond);
+		pthread_mutex_unlock(&cookie->seen_lock);
+
+		pthread_mutex_lock(&state->cookies_lock);
+		hashmap_remove(&state->cookies, &cookie->entry, NULL);
+		pthread_mutex_unlock(&state->cookies_lock);
+	}	
+}
 
 /* ask the daemon to quit */
 int fsmonitor_stop_daemon(void)

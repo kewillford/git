@@ -106,6 +106,12 @@ static int handle_client(struct ipc_command_listener *data,
 	}
 
 	strbuf_reset(&token);
+	/*
+	 * write out cookie file so the queue gets filled with all
+	 * the file system events that happen before the file gets written
+	 */
+	fsmonitor_wait_for_cookie(state);
+
 	pthread_mutex_lock(&state->queue_update_lock);
 	queue = state->first;
 	strbuf_addf(&token, "%"PRIu64"", state->latest_update);
@@ -140,6 +146,17 @@ static int paths_cmp(const void *data, const struct hashmap_entry *he1,
 		container_of(he2, const struct fsmonitor_path, entry);
 
 	return strcmp(a->path, keydata ? keydata : b->path);
+}
+
+static int cookies_cmp(const void *data, const struct hashmap_entry *he1,
+		     const struct hashmap_entry *he2, const void *keydata)
+{
+	const struct fsmonitor_cookie_item *a =
+		container_of(he1, const struct fsmonitor_cookie_item, entry);
+	const struct fsmonitor_cookie_item *b =
+		container_of(he2, const struct fsmonitor_cookie_item, entry);
+
+	return strcmp(a->name, keydata ? keydata : b->name);
 }
 
 #define FNV32_BASE ((unsigned int) 0x811c9dc5)
@@ -191,7 +208,9 @@ static int fsmonitor_run_daemon(int background)
 		BUG(_("daemonize() not supported on this platform"));
 
 	hashmap_init(&state.paths, paths_cmp, NULL, 0);
+	hashmap_init(&state.cookies, cookies_cmp, NULL, 0);
 	pthread_mutex_init(&state.queue_update_lock, NULL);
+	pthread_mutex_init(&state.cookies_lock, NULL);
 	pthread_mutex_init(&state.initial_mutex, NULL);
 	pthread_mutex_lock(&state.initial_mutex);
 

@@ -1,31 +1,34 @@
 #include "cache.h"
 #include "fsmonitor.h"
 
-static int process_entry(struct fsmonitor_daemon_state *state,
-			 FILE_NOTIFY_INFORMATION *info,
-			 struct fsmonitor_queue_item **queue_pointer,
-			 uint64_t time)
-{
-	char path[32768];
-	/* Convert to UTF-8 */
-	int len, i;
 
+static int normalize_path(FILE_NOTIFY_INFORMATION *info, struct strbuf *normalized_path)
+{
+	/* Convert to UTF-8 */
+	int len;
+
+	strbuf_reset(normalized_path);
+	strbuf_grow(normalized_path, 32768);
 	len = WideCharToMultiByte(CP_UTF8, 0, info->FileName,
 				  info->FileNameLength / sizeof(WCHAR),
-				  path, sizeof(path) - 1, NULL, NULL);
+				  normalized_path->buf, strbuf_avail(normalized_path) - 1, NULL, NULL);
 
-	if (len == 0 || len >= ARRAY_SIZE(path) - 1)
+	if (len == 0 || len >= 32768 - 1)
 		return error("could not convert '%.*S' to UTF-8",
 			     (int)(info->FileNameLength / sizeof(WCHAR)),
 			     info->FileName);
 
-	path[len] = '\0'; /* NUL-terminate */
-	for (i = 0; i < len; i++) /* convert backslashes to forward slashes */
-		if (path[i] == '\\')
-			path[i] = '/';
+	strbuf_setlen(normalized_path, len);
+	return strbuf_normalize_path(normalized_path);
+}
 
-	if (fsmonitor_queue_path(state, queue_pointer, path, len, time) < 0)
-		return error("could not queue '%s'; exiting", path);
+static int process_entry(struct fsmonitor_daemon_state *state,
+			 struct strbuf *path,
+			 struct fsmonitor_queue_item **queue_pointer,
+			 uint64_t time)
+{
+	if (fsmonitor_queue_path(state, queue_pointer, path->buf, path->len, time) < 0)
+		return error("could not queue '%s'; exiting", path->buf);
 
 	return 0;
 }
@@ -46,6 +49,7 @@ struct fsmonitor_daemon_state *fsmonitor_listen(struct fsmonitor_daemon_state *s
 	DWORD share_mode =
 		FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE;
 	DWORD count = 0;
+	int i;
 
 	dir = CreateFileW(L".", desired_access, share_mode, NULL, OPEN_EXISTING,
 			  FILE_FLAG_BACKUP_SEMANTICS, NULL);
@@ -53,6 +57,8 @@ struct fsmonitor_daemon_state *fsmonitor_listen(struct fsmonitor_daemon_state *s
 
 	for (;;) {
 		struct fsmonitor_queue_item dummy, *queue = &dummy;
+		struct strbuf path = STRBUF_INIT;
+		struct string_list cookie_release_list = STRING_LIST_INIT_DUP;
 		uint64_t time = getnanotime();
 
 		/* Ensure strictly increasing timestamps */
@@ -74,19 +80,26 @@ struct fsmonitor_daemon_state *fsmonitor_listen(struct fsmonitor_daemon_state *s
 		p = buffer;
 		for (;;) {
 			FILE_NOTIFY_INFORMATION *info = (void *)p;
+			normalize_path(info, &path);
 
 			if (info->Action == FILE_ACTION_REMOVED &&
-			    info->FileNameLength == 4 * sizeof(WCHAR) &&
-			    !wcsncmp(info->FileName, L".git", 4)) {
+			    path.len == 4 &&
+			    !strcmp(path.buf, ".git")) {
 				CloseHandle(dir);
 				/* force-quit */
 				exit(0);
 			}
 
-			if (process_entry(state, info, &queue, time) < 0) {
-				CloseHandle(dir);
-				state->error_code = -1;
-				return state;
+			if (info->Action != FILE_ACTION_REMOVED &&
+			    path.len > 4 && starts_with(path.buf, ".git/") &&
+			    starts_with(path.buf + 5, FSMONITOR_COOKIE_PREFIX)) {
+				string_list_append(&cookie_release_list, path.buf + 5);
+			} else if (strcmp(path.buf, ".git") && !starts_with(path.buf, ".git/")) {
+				if (process_entry(state, &path, &queue, time) < 0) {
+					CloseHandle(dir);
+					state->error_code = -1;
+					return state;
+				}
 			}
 
 			if (!info->NextEntryOffset)
@@ -94,17 +107,23 @@ struct fsmonitor_daemon_state *fsmonitor_listen(struct fsmonitor_daemon_state *s
 			p += info->NextEntryOffset;
 		}
 
-		/* Shouldn't happen; defensive programming */
-		if (queue == &dummy)
-			continue;
+		/* Only update the queue if it changed */
+		if (queue != &dummy) {
+			pthread_mutex_lock(&state->queue_update_lock);
+			if (state->first)
+				state->first->previous = dummy.previous;
+			dummy.previous->next = state->first;
+			state->first = queue;
+			state->latest_update = time;
+			pthread_mutex_unlock(&state->queue_update_lock);
+		}
 
-		pthread_mutex_lock(&state->queue_update_lock);
-		if (state->first)
-			state->first->previous = dummy.previous;
-		dummy.previous->next = state->first;
-		state->first = queue;
-		state->latest_update = time;
-		pthread_mutex_unlock(&state->queue_update_lock);
+		for (i = 0; i < cookie_release_list.nr; i++) {
+			fsmonitor_cookie_seen_trigger(state, cookie_release_list.items[i].string);
+		}
+
+		string_list_clear(&cookie_release_list, 0);
+		strbuf_release(&path);
 	}
 
 	return state;
