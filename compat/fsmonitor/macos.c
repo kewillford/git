@@ -201,8 +201,16 @@ static void fsevent_callback(ConstFSEventStreamRef streamRef,
 
 		if (strcmp(work_str.buf, ".git") && !starts_with(work_str.buf, ".git/")) {
 			log_flags_set(&work_str, event_flags[i]);
-			fsmonitor_queue_path(state, &queue,
-					     work_str.buf, work_str.len, time);
+			/* fsevent could be marked as both a file and directory */
+			if (event_flags[i] & kFSEventStreamEventFlagItemIsFile)
+				fsmonitor_queue_path(state, &queue,
+						     work_str.buf, work_str.len, time);
+
+			if (event_flags[i] & kFSEventStreamEventFlagItemIsDir) {
+				strbuf_addch(&work_str, '/');
+				fsmonitor_queue_path(state, &queue,
+						     work_str.buf, work_str.len, time);
+			}
 		} else if (starts_with(work_str.buf, ".git/") &&
 			   starts_with(work_str.buf + 5, FSMONITOR_COOKIE_PREFIX) &&
 			   !(event_flags[i] & kFSEventStreamEventFlagItemRemoved)) {
