@@ -16,7 +16,9 @@ test_expect_success 'can start and stop the daemon' '
 	(
 		cd test &&
 		: start the daemon implicitly by querying it &&
+		GIT_TRACE2_EVENT="$PWD/../.git/trace" \
 		git fsmonitor--daemon --query 1 0 >actual &&
+		grep "fsmonitor.*serve" ../.git/trace &&
 		git fsmonitor--daemon --is-running &&
 		nul_to_q <actual >actual.filtered &&
 		printf 0Q/Q >expect &&
